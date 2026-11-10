@@ -784,7 +784,7 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
                   <input
                     type="text"
                     required
-                    placeholder="cth: sarah atau aditya"
+                    placeholder="cth: username_rekan"
                     value={inviteUsername}
                     onChange={(e) => setInviteUsername(e.target.value)}
                     className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-7 pr-3 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white focus:outline-none focus:border-blue-500"

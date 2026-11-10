@@ -52,7 +52,7 @@ export function ProfileView() {
   const [isSaved, setIsSaved] = useState(false);
 
   // Security Form States
-  const [newPin, setNewPin] = useState(user?.securityPin || '123456');
+  const [newPin, setNewPin] = useState(user?.securityPin || '');
   const [pinSaved, setPinSaved] = useState(false);
 
   const [oldPassword, setOldPassword] = useState('');
@@ -378,43 +378,45 @@ export function ProfileView() {
             </button>
           </div>
 
-          {/* Switch Demo Accounts */}
-          <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <h2 className="text-sm font-bold text-slate-900 dark:text-white mb-2">
-              Uji Coba Multi-Akun (Simulasi Rekan)
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-              Ganti akun demo dengan 1-klik untuk menguji fitur Rekan & Keuangan Bersama secara bergantian.
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {allUsers.map((u) => {
-                const isCurrent = u.id === user?.id;
-                return (
-                  <button
-                    key={u.id}
-                    onClick={() => switchUser(u.id)}
-                    className={`p-3 rounded-2xl border text-left flex items-center justify-between transition-all ${
-                      isCurrent
-                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30'
-                        : 'border-slate-200 hover:border-slate-300 dark:border-slate-800'
-                    }`}
-                  >
-                    <div>
-                      <p className="text-xs font-bold text-slate-900 dark:text-white">{u.fullName}</p>
-                      <p className="text-[11px] text-slate-400">@{u.username}</p>
-                    </div>
-                    {isCurrent ? (
-                      <span className="text-[10px] font-bold text-blue-600 bg-white dark:bg-blue-900 px-2 py-0.5 rounded-full">
-                        Akun Aktif
-                      </span>
-                    ) : (
-                      <span className="text-xs text-slate-500">Ganti Akun</span>
-                    )}
-                  </button>
-                );
-              })}
+          {/* User Switcher (only if multiple users exist on device) */}
+          {allUsers.length > 1 && (
+            <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white mb-2">
+                Akun Terdaftar di Perangkat Ini
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                Pindah antar akun pengguna terdaftar di perangkat ini.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {allUsers.map((u) => {
+                  const isCurrent = u.id === user?.id;
+                  return (
+                    <button
+                      key={u.id}
+                      onClick={() => switchUser(u.id)}
+                      className={`p-3 rounded-2xl border text-left flex items-center justify-between transition-all ${
+                        isCurrent
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30'
+                          : 'border-slate-200 hover:border-slate-300 dark:border-slate-800'
+                      }`}
+                    >
+                      <div>
+                        <p className="text-xs font-bold text-slate-900 dark:text-white">{u.fullName}</p>
+                        <p className="text-[11px] text-slate-400">@{u.username}</p>
+                      </div>
+                      {isCurrent ? (
+                        <span className="text-[10px] font-bold text-blue-600 bg-white dark:bg-blue-900 px-2 py-0.5 rounded-full">
+                          Akun Aktif
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-500">Ganti Akun</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Logout */}
           <div className="pt-2">
@@ -505,7 +507,7 @@ export function ProfileView() {
                   type="password"
                   maxLength={6}
                   inputMode="numeric"
-                  placeholder="cth: 123456"
+                  placeholder="6 Angka PIN"
                   value={newPin}
                   onChange={(e) => setNewPin(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
                   className="w-full tracking-widest text-lg font-bold rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white focus:outline-none focus:border-blue-500"

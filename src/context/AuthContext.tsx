@@ -57,10 +57,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const unlockApp = (passOrPin: string): boolean => {
     if (!user) return false;
     const clean = passOrPin.trim();
-    const userPass = user.password || 'password123';
-    const userPin = user.securityPin || '123456';
+    const userPass = user.password;
+    const userPin = user.securityPin;
 
-    if (clean === userPass || clean === userPin) {
+    if ((userPass && clean === userPass) || (userPin && clean === userPin)) {
       setIsAppLocked(false);
       return true;
     }
@@ -79,8 +79,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const updatePassword = (oldPass: string, newPass: string): { success: boolean; error?: string } => {
     if (!user) return { success: false, error: 'Tidak ada sesi aktif.' };
-    const currentPass = user.password || 'password123';
-    if (oldPass !== currentPass) {
+    const currentPass = user.password;
+    if (currentPass && oldPass !== currentPass) {
       return { success: false, error: 'Password lama salah.' };
     }
     if (newPass.length < 8) {
@@ -106,8 +106,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     // Verify password if provided
-    const expectedPass = found.password || 'password123';
-    if (password && password !== expectedPass) {
+    if (password && password !== found.password) {
       return { success: false, error: 'Password salah. Silakan coba lagi.' };
     }
 
@@ -147,7 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       fullName: data.fullName.trim(),
       email: cleanEmail,
       password: data.password,
-      securityPin: '123456',
+      securityPin: '',
       isAppLockEnabled: true,
       currency: 'IDR',
       createdAt: new Date().toISOString(),

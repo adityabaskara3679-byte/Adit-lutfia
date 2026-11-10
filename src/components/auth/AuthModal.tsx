@@ -73,13 +73,6 @@ export function AuthModal() {
     }
   };
 
-  const handleQuickDemoLogin = async (demoUsername: string) => {
-    setErrorMessage('');
-    setIsLoading(true);
-    await login(demoUsername);
-    setIsLoading(false);
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md overflow-y-auto">
       <div className="w-full max-w-md rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden p-6 sm:p-8 animate-in fade-in zoom-in-95 duration-200 my-auto">
@@ -180,7 +173,7 @@ export function AuthModal() {
                     <input
                       type="text"
                       required
-                      placeholder="aditya atau email@domain.com"
+                      placeholder="username atau email@domain.com"
                       value={identifier}
                       onChange={(e) => setIdentifier(e.target.value)}
                       className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white focus:outline-none focus:border-blue-500"
@@ -251,7 +244,7 @@ export function AuthModal() {
                   <input
                     type="text"
                     required
-                    placeholder="cth: Aditya Baskara"
+                    placeholder="cth: Nama Anda"
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white focus:outline-none focus:border-blue-500"
@@ -265,7 +258,7 @@ export function AuthModal() {
                   <input
                     type="text"
                     required
-                    placeholder="cth: adityab"
+                    placeholder="cth: username_anda"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white focus:outline-none focus:border-blue-500"
@@ -279,7 +272,7 @@ export function AuthModal() {
                   <input
                     type="email"
                     required
-                    placeholder="aditya@example.com"
+                    placeholder="email@example.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white focus:outline-none focus:border-blue-500"
@@ -323,31 +316,6 @@ export function AuthModal() {
                 </button>
               </form>
             )}
-
-            {/* 1-Click Demo Accounts Quick Login for Reviewers */}
-            <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 text-center">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Akses Cepat Uji Coba Demo (1-Klik):
-              </span>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleQuickDemoLogin('aditya')}
-                  className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-left hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80 transition-colors"
-                >
-                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Aditya</p>
-                  <p className="text-[10px] text-slate-400">@aditya (Akun 1)</p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleQuickDemoLogin('sarah')}
-                  className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-left hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80 transition-colors"
-                >
-                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Sarah</p>
-                  <p className="text-[10px] text-slate-400">@sarah (Akun Rekan)</p>
-                </button>
-              </div>
-            </div>
           </>
         )}
       </div>

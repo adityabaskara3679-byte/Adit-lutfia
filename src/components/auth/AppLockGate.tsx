@@ -216,23 +216,18 @@ export function AppLockGate() {
           </form>
         )}
 
-        {/* Default Demo Helper Hint */}
-        <div className="mt-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 p-2 text-[11px] text-slate-500 dark:text-slate-400 border border-slate-200/60 dark:border-slate-800">
-          <p>
-            PIN bawaan: <strong className="text-blue-600 dark:text-blue-400">123456</strong> atau Password: <strong className="text-blue-600 dark:text-blue-400">password123</strong>
-          </p>
-        </div>
-
         {/* Footer Actions: Switch User or Logout */}
-        <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
-          <button
-            type="button"
-            onClick={() => setShowSwitchUser(!showSwitchUser)}
-            className="text-slate-500 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 font-medium"
-          >
-            <Users className="h-3.5 w-3.5" />
-            <span>Ganti Pengguna</span>
-          </button>
+        <div className={`mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center ${allUsers.length > 1 ? 'justify-between' : 'justify-end'} text-xs`}>
+          {allUsers.length > 1 && (
+            <button
+              type="button"
+              onClick={() => setShowSwitchUser(!showSwitchUser)}
+              className="text-slate-500 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 font-medium"
+            >
+              <Users className="h-3.5 w-3.5" />
+              <span>Ganti Pengguna</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={logout}

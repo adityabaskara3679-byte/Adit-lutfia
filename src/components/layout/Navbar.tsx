@@ -115,35 +115,37 @@ export function Navbar({ currentTab, onSelectTab, onOpenAddModal }: NavbarProps)
                   <p className="text-[11px] text-slate-400 truncate">{user?.email}</p>
                 </div>
 
-                {/* Demo User Switcher */}
-                <div className="py-2 border-b border-slate-100 dark:border-slate-800">
-                  <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    Ganti Akun Demo (Uji Rekan)
-                  </p>
-                  {allUsers.map((u) => {
-                    const isCurrent = u.id === user?.id;
-                    return (
-                      <button
-                        key={u.id}
-                        onClick={() => {
-                          switchUser(u.id);
-                          setShowUserDropdown(false);
-                        }}
-                        className={`flex w-full items-center justify-between px-3 py-1.5 text-xs rounded-lg transition-colors ${
-                          isCurrent
-                            ? 'bg-blue-50 text-blue-700 font-semibold dark:bg-blue-900/30 dark:text-blue-300'
-                            : 'text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 truncate">
-                          <span className="h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600" />
-                          <span className="truncate">{u.fullName} (@{u.username})</span>
-                        </div>
-                        {isCurrent && <UserCheck className="h-3.5 w-3.5 text-blue-600" />}
-                      </button>
-                    );
-                  })}
-                </div>
+                {/* User Switcher (only if multiple users exist on device) */}
+                {allUsers.length > 1 && (
+                  <div className="py-2 border-b border-slate-100 dark:border-slate-800">
+                    <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Ganti Akun Terdaftar
+                    </p>
+                    {allUsers.map((u) => {
+                      const isCurrent = u.id === user?.id;
+                      return (
+                        <button
+                          key={u.id}
+                          onClick={() => {
+                            switchUser(u.id);
+                            setShowUserDropdown(false);
+                          }}
+                          className={`flex w-full items-center justify-between px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                            isCurrent
+                              ? 'bg-blue-50 text-blue-700 font-semibold dark:bg-blue-900/30 dark:text-blue-300'
+                              : 'text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 truncate">
+                            <span className="h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600" />
+                            <span className="truncate">{u.fullName} (@{u.username})</span>
+                          </div>
+                          {isCurrent && <UserCheck className="h-3.5 w-3.5 text-blue-600" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* Profile & Logout */}
                 <div className="pt-1">
