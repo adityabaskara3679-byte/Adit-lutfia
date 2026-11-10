@@ -1,0 +1,6 @@
+{
+  "name": "MitraKeuangan",
+  "description": "Aplikasi manajemen keuangan pribadi dan rekan modern dengan pelacakan transaksi, anggaran, tabungan, utang piutang, dan dashboard bersama.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
