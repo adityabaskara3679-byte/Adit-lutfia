@@ -21,7 +21,8 @@ import {
   Check,
   Share2,
   Link2,
-  KeyRound
+  KeyRound,
+  RefreshCw
 } from 'lucide-react';
 import {
   UserProfile,
@@ -37,6 +38,7 @@ import {
   saveFriendship,
   deleteFriendship,
   saveUser,
+  importPartnerFinancialData,
   getAccounts,
   getTransactions,
   getSavingsGoals,
@@ -47,6 +49,7 @@ import {
   DEFAULT_SHARING_PERMISSIONS
 } from '../../lib/storage.ts';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase.ts';
+import { syncPartnerFromCloud, pushUserDataToCloud } from '../../lib/cloudSync.ts';
 import {
   IncomeExpenseChart,
   BalanceTrendChart,
@@ -202,6 +205,8 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
   const [copiedMyLink, setCopiedMyLink] = useState(false);
   const [isSearchingCloud, setIsSearchingCloud] = useState(false);
 
+  const [isSyncing, setIsSyncing] = useState(false);
+
   const currentUser = useMemo(() => allUsers.find((u) => u.id === userId), [allUsers, userId]);
 
   const generateMyPairingCode = () => {
@@ -212,6 +217,11 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
       fullName: currentUser.fullName,
       email: currentUser.email,
       currency: currentUser.currency || 'IDR',
+      accounts: getAccounts(userId),
+      transactions: getTransactions(userId).slice(0, 50),
+      savings: getSavingsGoals(userId),
+      debts: getDebts(userId),
+      syncedAt: new Date().toISOString(),
     };
     try {
       return 'MK-SYNC-' + btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
@@ -244,6 +254,32 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
     }
   };
 
+  const handleSyncLive = async () => {
+    setIsSyncing(true);
+
+    if (isSupabaseConfigured) {
+      await pushUserDataToCloud(userId);
+      if (partnerUser) {
+        await syncPartnerFromCloud(partnerUser.id);
+      }
+      setIsSyncing(false);
+      alert('Data keuangan rekan berhasil diperbarui dari database cloud!');
+      window.location.reload();
+      return;
+    }
+
+    setIsSyncing(false);
+    setInviteMethod('code');
+    setShowInviteModal(true);
+  };
+
+  // Auto-sync from cloud if Supabase is active
+  useEffect(() => {
+    if (isSupabaseConfigured && partnerUser?.id) {
+      syncPartnerFromCloud(partnerUser.id);
+    }
+  }, [partnerUser?.id]);
+
   const handleConnectViaCode = (codeToConnect?: string) => {
     const raw = (codeToConnect || partnerCodeInput).trim();
     if (!raw) {
@@ -272,14 +308,20 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
         return;
       }
 
-      // Save partner to local users list so they exist on this device!
-      saveUser({
-        id: partnerData.id,
-        username: partnerData.username,
-        fullName: partnerData.fullName || partnerData.username,
-        email: partnerData.email || `${partnerData.username}@local.app`,
-        currency: partnerData.currency || 'IDR',
-        createdAt: new Date().toISOString(),
+      // Save partner profile AND import their real accounts, transactions, savings, debts!
+      importPartnerFinancialData({
+        profile: {
+          id: partnerData.id,
+          username: partnerData.username,
+          fullName: partnerData.fullName || partnerData.username,
+          email: partnerData.email || `${partnerData.username}@local.app`,
+          currency: partnerData.currency || 'IDR',
+          createdAt: partnerData.createdAt || new Date().toISOString(),
+        },
+        accounts: partnerData.accounts || [],
+        transactions: partnerData.transactions || [],
+        savings: partnerData.savings || [],
+        debts: partnerData.debts || [],
       });
 
       // Check if friendship already exists
@@ -290,18 +332,14 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
       );
 
       if (existing) {
-        if (existing.status === 'accepted') {
-          setInviteError(`Anda sudah terhubung dengan @${partnerData.username}.`);
-          return;
-        }
-        // If pending, accept immediately
+        // If already connected or pending, refresh state and update
         const accepted: Friendship = {
           ...existing,
           status: 'accepted',
           updatedAt: new Date().toISOString(),
         };
         saveFriendship(accepted);
-        alert(`Berhasil terhubung dengan @${partnerData.username}!`);
+        alert(`Data keuangan nyata milik @${partnerData.username} berhasil disinkronkan & diperbarui!`);
         setShowInviteModal(false);
         window.location.reload();
         return;
@@ -321,7 +359,7 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
 
       saveFriendship(newFriendship);
       setShowInviteModal(false);
-      alert(`Selamat! Anda dan @${partnerData.username} berhasil terhubung sebagai rekan keuangan.`);
+      alert(`Selamat! Anda dan @${partnerData.username} berhasil terhubung. Seluruh data keuangan nyata rekan telah dimuat.`);
       window.location.reload();
     } catch {
       setInviteError('Format kode rekan tidak valid. Pastikan kode disalin lengkap dari HP rekan.');
@@ -487,7 +525,17 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          {activePartnerData && (
+            <button
+              onClick={handleSyncLive}
+              disabled={isSyncing}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50/70 px-3.5 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300 shadow-sm transition-colors"
+            >
+              <RefreshCw className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'Sinkronisasi...' : 'Sinkronkan Data Rekan'}</span>
+            </button>
+          )}
           {activePartnerData ? (
             <button
               onClick={() => setShowPermissionsModal(true)}
@@ -816,6 +864,29 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Fallback card if partner data is not yet synchronized */}
+          {partnerAccounts.length === 0 && partnerFilteredTx.length === 0 && (
+            <div className="p-6 rounded-3xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-center space-y-3">
+              <Users className="mx-auto h-8 w-8 text-blue-500" />
+              <div>
+                <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                  Data Rekan Belum Termuat di Perangkat Ini
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto">
+                  Karena akun rekan dibuat di HP terpisah, minta rekan Anda mengklik tombol <strong>Salin Kode Saya</strong> di HP miliknya, lalu klik tombol di bawah untuk menyinkronkan data secara instan.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleSyncLive}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 active:scale-95 transition-all"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{isSyncing ? 'Menyinkronkan...' : 'Sinkronkan Data Rekan Sekarang'}</span>
+              </button>
             </div>
           )}
         </div>

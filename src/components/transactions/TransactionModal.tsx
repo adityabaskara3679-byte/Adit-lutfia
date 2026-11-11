@@ -24,6 +24,7 @@ import {
   deleteTransaction,
   formatRupiah
 } from '../../lib/storage.ts';
+import { pushUserDataToCloud } from '../../lib/cloudSync.ts';
 
 interface TransactionModalProps {
   isOpen: boolean;
@@ -160,6 +161,7 @@ export function TransactionModal({
     };
 
     saveTransaction(tx);
+    pushUserDataToCloud(userId);
     onSaved();
     onClose();
   };
@@ -167,6 +169,7 @@ export function TransactionModal({
   const handleDelete = () => {
     if (initialTransaction && confirm('Apakah Anda yakin ingin menghapus transaksi ini?')) {
       deleteTransaction(initialTransaction.id);
+      pushUserDataToCloud(userId);
       onSaved();
       onClose();
     }

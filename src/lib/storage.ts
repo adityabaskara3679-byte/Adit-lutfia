@@ -427,6 +427,48 @@ export function deleteFriendship(friendshipId: string) {
   localStorage.setItem(FRIENDSHIPS_KEY, JSON.stringify(filtered));
 }
 
+// Bulk import/sync partner's real financial data into local storage
+export function importPartnerFinancialData(data: {
+  profile: UserProfile;
+  accounts?: FinancialAccount[];
+  transactions?: Transaction[];
+  savings?: SavingsGoal[];
+  debts?: Debt[];
+}) {
+  const partnerId = data.profile.id;
+
+  // 1. Save partner profile
+  saveUser(data.profile);
+
+  // 2. Save/merge accounts
+  if (data.accounts && Array.isArray(data.accounts)) {
+    const list: FinancialAccount[] = JSON.parse(localStorage.getItem(ACCOUNTS_KEY) || '[]');
+    const otherAccounts = list.filter((a) => a.userId !== partnerId);
+    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify([...otherAccounts, ...data.accounts]));
+  }
+
+  // 3. Save/merge transactions
+  if (data.transactions && Array.isArray(data.transactions)) {
+    const list: Transaction[] = JSON.parse(localStorage.getItem(TRANSACTIONS_KEY) || '[]');
+    const otherTxs = list.filter((t) => t.userId !== partnerId);
+    localStorage.setItem(TRANSACTIONS_KEY, JSON.stringify([...otherTxs, ...data.transactions]));
+  }
+
+  // 4. Save/merge savings
+  if (data.savings && Array.isArray(data.savings)) {
+    const list: SavingsGoal[] = JSON.parse(localStorage.getItem(SAVINGS_KEY) || '[]');
+    const otherSavings = list.filter((s) => s.userId !== partnerId);
+    localStorage.setItem(SAVINGS_KEY, JSON.stringify([...otherSavings, ...data.savings]));
+  }
+
+  // 5. Save/merge debts
+  if (data.debts && Array.isArray(data.debts)) {
+    const list: Debt[] = JSON.parse(localStorage.getItem(DEBTS_KEY) || '[]');
+    const otherDebts = list.filter((d) => d.userId !== partnerId);
+    localStorage.setItem(DEBTS_KEY, JSON.stringify([...otherDebts, ...data.debts]));
+  }
+}
+
 // Formatting helpers
 export function formatRupiah(amount: number, currency: string = 'IDR'): string {
   if (currency === 'USD') {
