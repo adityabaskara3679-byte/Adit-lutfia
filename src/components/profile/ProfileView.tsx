@@ -17,7 +17,11 @@ import {
   Lock,
   ShieldCheck,
   KeyRound,
-  AlertCircle
+  AlertCircle,
+  Database,
+  Copy,
+  FileCode,
+  ExternalLink
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { useTheme } from '../../context/ThemeContext.tsx';
@@ -183,6 +187,183 @@ export function ProfileView() {
       }
     };
     reader.readAsText(file);
+  };
+
+  const [sqlCopied, setSqlCopied] = useState(false);
+
+  const supabaseSqlSchema = `-- ==============================================================================
+-- SKEMA DATABASE SUPABASE (POSTGRESQL) - APLIKASI MITRA KEUANGAN
+-- ==============================================================================
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- 1. TABEL PROFIL PENGGUNA (PROFILES)
+CREATE TABLE IF NOT EXISTS public.profiles (
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    username TEXT UNIQUE NOT NULL,
+    full_name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    security_pin VARCHAR(6) DEFAULT NULL,
+    is_app_lock_enabled BOOLEAN DEFAULT TRUE,
+    avatar_url TEXT DEFAULT NULL,
+    currency VARCHAR(10) DEFAULT 'IDR',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. TABEL REKENING / SUMBER DANA (ACCOUNTS)
+CREATE TABLE IF NOT EXISTS public.accounts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('cash', 'bank', 'ewallet', 'investment')),
+    account_number TEXT DEFAULT NULL,
+    balance NUMERIC(15, 2) DEFAULT 0.00,
+    color VARCHAR(20) DEFAULT '#2563EB',
+    icon VARCHAR(50) DEFAULT 'Wallet',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 3. TABEL KATEGORI KEUANGAN (CATEGORIES)
+CREATE TABLE IF NOT EXISTS public.categories (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
+    icon VARCHAR(50) DEFAULT 'Tag',
+    color VARCHAR(20) DEFAULT '#2563EB',
+    is_custom BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 4. TABEL TRANSAKSI (TRANSACTIONS)
+CREATE TABLE IF NOT EXISTS public.transactions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    type TEXT NOT NULL CHECK (type IN ('income', 'expense', 'transfer', 'savings')),
+    title TEXT NOT NULL,
+    amount NUMERIC(15, 2) NOT NULL CHECK (amount >= 0),
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+    category_id UUID REFERENCES public.categories(id) ON DELETE SET NULL,
+    account_id UUID REFERENCES public.accounts(id) ON DELETE SET NULL,
+    to_account_id UUID REFERENCES public.accounts(id) ON DELETE SET NULL,
+    payment_method TEXT NOT NULL CHECK (payment_method IN ('cash', 'transfer', 'debit', 'credit', 'qris', 'ewallet')),
+    notes TEXT DEFAULT NULL,
+    receipt_url TEXT DEFAULT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. TABEL ANGGARAN BULANAN (BUDGETS)
+CREATE TABLE IF NOT EXISTS public.budgets (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    category_id UUID NOT NULL REFERENCES public.categories(id) ON DELETE CASCADE,
+    monthly_limit NUMERIC(15, 2) NOT NULL CHECK (monthly_limit >= 0),
+    month VARCHAR(7) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, category_id, month)
+);
+
+-- 6. TABEL TARGET TABUNGAN (SAVINGS_GOALS)
+CREATE TABLE IF NOT EXISTS public.savings_goals (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    target_amount NUMERIC(15, 2) NOT NULL CHECK (target_amount > 0),
+    current_amount NUMERIC(15, 2) DEFAULT 0.00,
+    target_date DATE NOT NULL,
+    notes TEXT DEFAULT NULL,
+    color VARCHAR(20) DEFAULT '#2563EB',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- TABEL SETORAN TABUNGAN
+CREATE TABLE IF NOT EXISTS public.savings_deposits (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    savings_goal_id UUID NOT NULL REFERENCES public.savings_goals(id) ON DELETE CASCADE,
+    amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+    note TEXT DEFAULT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 7. TABEL UTANG & PIUTANG (DEBTS)
+CREATE TABLE IF NOT EXISTS public.debts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    type TEXT NOT NULL CHECK (type IN ('debt', 'receivable')),
+    person_name TEXT NOT NULL,
+    amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
+    paid_amount NUMERIC(15, 2) DEFAULT 0.00,
+    start_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    due_date DATE NOT NULL,
+    notes TEXT DEFAULT NULL,
+    status TEXT NOT NULL DEFAULT 'unpaid' CHECK (status IN ('unpaid', 'partial', 'paid')),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- TABEL CICILAN UTANG
+CREATE TABLE IF NOT EXISTS public.debt_installments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    debt_id UUID NOT NULL REFERENCES public.debts(id) ON DELETE CASCADE,
+    amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+    note TEXT DEFAULT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 8. TABEL REKAN / PASANGAN (FRIENDSHIPS)
+CREATE TABLE IF NOT EXISTS public.friendships (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    requester_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    receiver_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected')),
+    requester_permissions JSONB DEFAULT '{"shareBalance": true, "shareIncome": true, "shareExpense": true, "shareSavings": true, "shareDebts": true, "shareTransactions": true, "shareReports": true}',
+    receiver_permissions JSONB DEFAULT '{"shareBalance": true, "shareIncome": true, "shareExpense": true, "shareSavings": true, "shareDebts": true, "shareTransactions": true, "shareReports": true}',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(requester_id, receiver_id)
+);
+
+-- ROW LEVEL SECURITY (RLS)
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.budgets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.savings_goals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.savings_deposits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.debts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.debt_installments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.friendships ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage their own profile" ON public.profiles FOR ALL USING (auth.uid() = id);
+CREATE POLICY "Users can manage their accounts" ON public.accounts FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Users can view categories" ON public.categories FOR SELECT USING (user_id IS NULL OR auth.uid() = user_id);
+CREATE POLICY "Users can manage custom categories" ON public.categories FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage transactions" ON public.transactions FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage budgets" ON public.budgets FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage savings" ON public.savings_goals FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage debts" ON public.debts FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Users can manage friendships" ON public.friendships FOR ALL USING (auth.uid() = requester_id OR auth.uid() = receiver_id);
+`;
+
+  const handleDownloadSupabaseSchema = () => {
+    const blob = new Blob([supabaseSqlSchema], { type: 'text/sql' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'supabase_schema.sql';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCopySupabaseSchema = () => {
+    navigator.clipboard.writeText(supabaseSqlSchema);
+    setSqlCopied(true);
+    setTimeout(() => setSqlCopied(false), 2500);
   };
 
   const handleSavePin = (e: React.FormEvent) => {
@@ -839,6 +1020,95 @@ export function ProfileView() {
                 </label>
               </div>
             </div>
+          </div>
+
+          {/* CARD: INTEGRASI VS CODE & SUPABASE */}
+          <div className="rounded-3xl border border-blue-200/80 bg-gradient-to-br from-blue-50/50 via-white to-slate-50 p-6 shadow-sm dark:border-blue-900/40 dark:from-slate-900 dark:via-slate-900 dark:to-blue-950/20 space-y-4">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-md shadow-blue-500/30">
+                  <Database className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span>Pengembangan Lokal di VS Code & Database Supabase</span>
+                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700 dark:bg-blue-900/60 dark:text-blue-300">
+                      Cloud SQL
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Gunakan skrip SQL dan panduan ini untuk menghubungkan aplikasi Anda ke Supabase PostgreSQL melalui VS Code.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Steps Overview */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+              <div className="p-3 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-800">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-blue-700 text-xs font-bold dark:bg-blue-900 dark:text-blue-300 mb-2">
+                  1
+                </span>
+                <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Buat Database</p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Buka supabase.com, buat project baru, dan buka menu <strong>SQL Editor</strong>.
+                </p>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-800">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-blue-700 text-xs font-bold dark:bg-blue-900 dark:text-blue-300 mb-2">
+                  2
+                </span>
+                <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Jalankan SQL</p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Salin atau unduh file skema SQL di bawah ini dan klik <strong>Run</strong> di Supabase SQL Editor.
+                </p>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-800">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 text-blue-700 text-xs font-bold dark:bg-blue-900 dark:text-blue-300 mb-2">
+                  3
+                </span>
+                <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Koneksi .env.local</p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Salin Project URL & Anon Key ke file <code>.env.local</code> di VS Code Anda.
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleDownloadSupabaseSchema}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors"
+              >
+                <Download className="h-4 w-4" />
+                <span>Unduh Skema SQL (supabase_schema.sql)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCopySupabaseSchema}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 transition-colors"
+              >
+                {sqlCopied ? (
+                  <>
+                    <Check className="h-4 w-4 text-emerald-600" />
+                    <span className="text-emerald-600 font-bold">Skrip SQL Berhasil Disalin!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-4 w-4" />
+                    <span>Salin Seluruh Skrip SQL</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              💡 Panduan langkah demi langkah lengkap tersedia di file <code>PANDUAN_VSCODE_SUPABASE.md</code> di dalam folder proyek Anda.
+            </p>
           </div>
         </div>
       )}
