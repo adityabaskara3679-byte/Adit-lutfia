@@ -1,13 +1,36 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+export function getSupabaseCredentials() {
+  const envUrl = import.meta.env.VITE_SUPABASE_URL || '';
+  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+  const localUrl = typeof window !== 'undefined' ? localStorage.getItem('mitra_keuangan_supabase_url') || '' : '';
+  const localKey = typeof window !== 'undefined' ? localStorage.getItem('mitra_keuangan_supabase_anon_key') || '' : '';
 
-export const isSupabaseConfigured = Boolean(
-  supabaseUrl && supabaseAnonKey && supabaseUrl !== 'https://your-project.supabase.co'
-);
+  const url = localUrl || envUrl;
+  const key = localKey || envKey;
+
+  const isConfigured = Boolean(
+    url &&
+    key &&
+    !url.includes('your-project') &&
+    !url.includes('placeholder')
+  );
+
+  return { url, key, isConfigured };
+}
+
+const creds = getSupabaseCredentials();
+
+export const isSupabaseConfigured = creds.isConfigured;
 
 export const supabase = createClient(
-  supabaseUrl || 'https://placeholder-url.supabase.co',
-  supabaseAnonKey || 'placeholder-anon-key'
+  creds.url || 'https://placeholder-url.supabase.co',
+  creds.key || 'placeholder-anon-key'
 );
+
+export function setCustomSupabaseCredentials(url: string, key: string) {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('mitra_keuangan_supabase_url', url.trim());
+    localStorage.setItem('mitra_keuangan_supabase_anon_key', key.trim());
+  }
+}

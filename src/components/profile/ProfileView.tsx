@@ -35,6 +35,7 @@ import {
   deleteAccount,
   formatRupiah
 } from '../../lib/storage.ts';
+import { getSupabaseCredentials, setCustomSupabaseCredentials } from '../../lib/supabase.ts';
 
 export function ProfileView() {
   const {
@@ -364,6 +365,21 @@ CREATE POLICY "Users can manage friendships" ON public.friendships FOR ALL USING
     navigator.clipboard.writeText(supabaseSqlSchema);
     setSqlCopied(true);
     setTimeout(() => setSqlCopied(false), 2500);
+  };
+
+  const currentCreds = useMemo(() => getSupabaseCredentials(), []);
+  const [cloudUrl, setCloudUrl] = useState(currentCreds.url);
+  const [cloudKey, setCloudKey] = useState(currentCreds.key);
+  const [cloudSaved, setCloudSaved] = useState(false);
+
+  const handleSaveCloudCredentials = (e: React.FormEvent) => {
+    e.preventDefault();
+    setCustomSupabaseCredentials(cloudUrl, cloudKey);
+    setCloudSaved(true);
+    setTimeout(() => {
+      setCloudSaved(false);
+      window.location.reload();
+    }, 1500);
   };
 
   const handleSavePin = (e: React.FormEvent) => {
@@ -1105,6 +1121,65 @@ CREATE POLICY "Users can manage friendships" ON public.friendships FOR ALL USING
                 )}
               </button>
             </div>
+
+            {/* Form Koneksi Langsung Supabase di Browser */}
+            <form onSubmit={handleSaveCloudCredentials} className="mt-4 p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <Database className="h-4 w-4 text-blue-600" />
+                  <span>Koneksi Supabase Langsung di Browser (Opsional)</span>
+                </span>
+                {currentCreds.isConfigured && (
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 dark:bg-emerald-950 dark:text-emerald-300 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <Check className="h-3 w-3" /> Terhubung
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Masukkan Project URL & Anon Key dari Dashboard Supabase Anda jika ingin sinkronisasi multi-perangkat langsung aktif di HP ini:
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    Project URL
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://xyzabcdefg.supabase.co"
+                    value={cloudUrl}
+                    onChange={(e) => setCloudUrl(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    Anon Public Key
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    value={cloudKey}
+                    onChange={(e) => setCloudKey(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <button
+                  type="submit"
+                  className="rounded-xl bg-blue-600 py-2 px-4 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 active:scale-95 transition-all"
+                >
+                  Simpan & Hubungkan Database
+                </button>
+                {cloudSaved && (
+                  <span className="text-xs font-semibold text-emerald-600 flex items-center gap-1">
+                    <Check className="h-4 w-4" /> Kredensial Tersimpan! Memuat ulang...
+                  </span>
+                )}
+              </div>
+            </form>
 
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
               💡 Panduan langkah demi langkah lengkap tersedia di file <code>PANDUAN_VSCODE_SUPABASE.md</code> di dalam folder proyek Anda.

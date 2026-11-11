@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Users,
   UserPlus,
@@ -16,7 +16,12 @@ import {
   ChevronRight,
   Info,
   Calendar,
-  AlertCircle
+  AlertCircle,
+  Copy,
+  Check,
+  Share2,
+  Link2,
+  KeyRound
 } from 'lucide-react';
 import {
   UserProfile,
@@ -31,6 +36,7 @@ import {
   getActivePartner,
   saveFriendship,
   deleteFriendship,
+  saveUser,
   getAccounts,
   getTransactions,
   getSavingsGoals,
@@ -40,6 +46,7 @@ import {
   formatDateIndonesian,
   DEFAULT_SHARING_PERMISSIONS
 } from '../../lib/storage.ts';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase.ts';
 import {
   IncomeExpenseChart,
   BalanceTrendChart,
@@ -189,8 +196,151 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
   const jointSavings = mySavingsTotal + partnerSavingsTotal;
   const jointNet = jointIncome - jointExpense;
 
+  const [inviteMethod, setInviteMethod] = useState<'code' | 'username'>('code');
+  const [partnerCodeInput, setPartnerCodeInput] = useState('');
+  const [copiedMyCode, setCopiedMyCode] = useState(false);
+  const [copiedMyLink, setCopiedMyLink] = useState(false);
+  const [isSearchingCloud, setIsSearchingCloud] = useState(false);
+
+  const currentUser = useMemo(() => allUsers.find((u) => u.id === userId), [allUsers, userId]);
+
+  const generateMyPairingCode = () => {
+    if (!currentUser) return '';
+    const payload = {
+      id: currentUser.id,
+      username: currentUser.username,
+      fullName: currentUser.fullName,
+      email: currentUser.email,
+      currency: currentUser.currency || 'IDR',
+    };
+    try {
+      return 'MK-SYNC-' + btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+    } catch {
+      return 'MK-SYNC-' + btoa(JSON.stringify(payload));
+    }
+  };
+
+  const generateMyInviteLink = () => {
+    const code = generateMyPairingCode();
+    if (!code) return '';
+    return `${window.location.origin}${window.location.pathname}#invite=${code}`;
+  };
+
+  const handleCopyMyCode = () => {
+    const code = generateMyPairingCode();
+    if (code) {
+      navigator.clipboard.writeText(code);
+      setCopiedMyCode(true);
+      setTimeout(() => setCopiedMyCode(false), 2500);
+    }
+  };
+
+  const handleCopyMyLink = () => {
+    const link = generateMyInviteLink();
+    if (link) {
+      navigator.clipboard.writeText(link);
+      setCopiedMyLink(true);
+      setTimeout(() => setCopiedMyLink(false), 2500);
+    }
+  };
+
+  const handleConnectViaCode = (codeToConnect?: string) => {
+    const raw = (codeToConnect || partnerCodeInput).trim();
+    if (!raw) {
+      setInviteError('Masukkan kode rekan atau buka tautan undangan rekan.');
+      return;
+    }
+
+    try {
+      let cleanCode = raw;
+      if (raw.includes('#invite=')) {
+        cleanCode = raw.split('#invite=')[1];
+      }
+      if (cleanCode.startsWith('MK-SYNC-')) {
+        cleanCode = cleanCode.replace('MK-SYNC-', '');
+      }
+
+      const jsonStr = decodeURIComponent(escape(atob(cleanCode)));
+      const partnerData = JSON.parse(jsonStr);
+
+      if (!partnerData.id || !partnerData.username) {
+        throw new Error('Data profil rekan tidak valid');
+      }
+
+      if (partnerData.id === userId) {
+        setInviteError('Anda tidak dapat menghubungkan akun sendiri.');
+        return;
+      }
+
+      // Save partner to local users list so they exist on this device!
+      saveUser({
+        id: partnerData.id,
+        username: partnerData.username,
+        fullName: partnerData.fullName || partnerData.username,
+        email: partnerData.email || `${partnerData.username}@local.app`,
+        currency: partnerData.currency || 'IDR',
+        createdAt: new Date().toISOString(),
+      });
+
+      // Check if friendship already exists
+      const existing = friendships.find(
+        (f) =>
+          (f.requesterId === userId && f.receiverId === partnerData.id) ||
+          (f.receiverId === userId && f.requesterId === partnerData.id)
+      );
+
+      if (existing) {
+        if (existing.status === 'accepted') {
+          setInviteError(`Anda sudah terhubung dengan @${partnerData.username}.`);
+          return;
+        }
+        // If pending, accept immediately
+        const accepted: Friendship = {
+          ...existing,
+          status: 'accepted',
+          updatedAt: new Date().toISOString(),
+        };
+        saveFriendship(accepted);
+        alert(`Berhasil terhubung dengan @${partnerData.username}!`);
+        setShowInviteModal(false);
+        window.location.reload();
+        return;
+      }
+
+      // Create mutually accepted friendship since code was shared directly
+      const newFriendship: Friendship = {
+        id: `fr-${Date.now()}`,
+        requesterId: userId,
+        receiverId: partnerData.id,
+        status: 'accepted',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        requesterPermissions: { ...DEFAULT_SHARING_PERMISSIONS },
+        receiverPermissions: { ...DEFAULT_SHARING_PERMISSIONS },
+      };
+
+      saveFriendship(newFriendship);
+      setShowInviteModal(false);
+      alert(`Selamat! Anda dan @${partnerData.username} berhasil terhubung sebagai rekan keuangan.`);
+      window.location.reload();
+    } catch {
+      setInviteError('Format kode rekan tidak valid. Pastikan kode disalin lengkap dari HP rekan.');
+    }
+  };
+
+  // URL Hash Auto-invite check on load
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.hash.includes('#invite=')) {
+      const code = window.location.hash.split('#invite=')[1];
+      if (code) {
+        handleConnectViaCode(code);
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+    }
+  }, []);
+
   // Handlers for Friendship Invitation
-  const handleSendInvite = (e: React.FormEvent) => {
+  const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     setInviteError('');
     const targetUsername = inviteUsername.trim().toLowerCase();
@@ -200,9 +350,38 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
       return;
     }
 
-    const targetUser = allUsers.find((u) => u.username.toLowerCase() === targetUsername);
+    // 1. Check local users first
+    let targetUser = allUsers.find((u) => u.username.toLowerCase() === targetUsername);
+
+    // 2. If not found locally, query Supabase cloud if configured!
+    if (!targetUser && isSupabaseConfigured) {
+      setIsSearchingCloud(true);
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .ilike('username', targetUsername)
+          .maybeSingle();
+
+        if (data && !error) {
+          targetUser = {
+            id: data.id,
+            username: data.username,
+            fullName: data.full_name || data.username,
+            email: data.email,
+            currency: data.currency || 'IDR',
+            createdAt: data.created_at || new Date().toISOString(),
+          };
+          saveUser(targetUser);
+        }
+      } catch {}
+      setIsSearchingCloud(false);
+    }
+
     if (!targetUser) {
-      setInviteError(`User dengan username "${targetUsername}" tidak ditemukan.`);
+      setInviteError(
+        `User "${targetUsername}" tidak ditemukan di perangkat ini. Karena data belum terhubung ke database online, gunakan tab "Kode Hubung Instan" di atas untuk menghubungkan antar-HP langsung!`
+      );
       return;
     }
 
@@ -422,12 +601,34 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
           <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto mt-1">
             Undang pasangan, rekan usaha, atau keluarga dengan username mereka untuk mulai memantau dan menggabungkan keuangan bersama.
           </p>
-          <button
-            onClick={() => setShowInviteModal(true)}
-            className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700"
-          >
-            Kirim Undangan Rekan
-          </button>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            <button
+              onClick={() => {
+                setInviteMethod('code');
+                setShowInviteModal(true);
+              }}
+              className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 flex items-center gap-1.5"
+            >
+              <KeyRound className="h-3.5 w-3.5" />
+              <span>Hubungkan Rekan (Kode / Link)</span>
+            </button>
+            <button
+              onClick={handleCopyMyCode}
+              className="rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-sm hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-1.5"
+            >
+              {copiedMyCode ? (
+                <>
+                  <Check className="h-3.5 w-3.5 text-emerald-600" />
+                  <span className="text-emerald-600 font-bold">Kode Saya Tersalin!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5" />
+                  <span>Salin Kode Saya</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       )}
 
@@ -765,56 +966,187 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
 
       {/* MODAL: INVITE PARTNER */}
       {showInviteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full max-w-md rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 shadow-2xl">
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">
-              Undang Rekan Keuangan
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Cari pengguna lain berdasarkan username mereka untuk mengirim undangan pertemanan keuangan.
-            </p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in overflow-y-auto">
+          <div className="w-full max-w-md rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 shadow-2xl my-auto">
+            <div className="flex items-center justify-between pb-2">
+              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Users className="h-5 w-5 text-blue-600" />
+                <span>Hubungkan Rekan Keuangan</span>
+              </h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowInviteModal(false);
+                  setInviteError('');
+                }}
+                className="text-slate-400 hover:text-slate-600 text-xs font-semibold p-1"
+              >
+                ✕
+              </button>
+            </div>
 
-            <form onSubmit={handleSendInvite} className="mt-4 space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Username Rekan
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">@</span>
+            {/* Tab Selector: Kode Instan vs Cari Username */}
+            <div className="mt-3 flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setInviteMethod('code');
+                  setInviteError('');
+                }}
+                className={`flex-1 rounded-lg py-1.5 text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  inviteMethod === 'code'
+                    ? 'bg-white text-blue-600 shadow-sm dark:bg-slate-900 dark:text-blue-400'
+                    : 'text-slate-500 hover:text-slate-900 dark:text-slate-400'
+                }`}
+              >
+                <KeyRound className="h-3.5 w-3.5" />
+                <span>Kode Rekan (Beda HP)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setInviteMethod('username');
+                  setInviteError('');
+                }}
+                className={`flex-1 rounded-lg py-1.5 text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  inviteMethod === 'username'
+                    ? 'bg-white text-blue-600 shadow-sm dark:bg-slate-900 dark:text-blue-400'
+                    : 'text-slate-500 hover:text-slate-900 dark:text-slate-400'
+                }`}
+              >
+                <Users className="h-3.5 w-3.5" />
+                <span>Cari @username</span>
+              </button>
+            </div>
+
+            {/* METHOD 1: INSTANT PAIRING CODE (WORKS IMMEDIATELY ACROSS PHONES!) */}
+            {inviteMethod === 'code' && (
+              <div className="mt-4 space-y-4">
+                {/* 1. Bagikan Kode Saya */}
+                <div className="p-3.5 rounded-2xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-blue-900 dark:text-blue-300 uppercase tracking-wider">
+                      Kode Profil Saya
+                    </span>
+                    <span className="text-[10px] text-blue-600 dark:text-blue-400 bg-white dark:bg-blue-900/60 px-2 py-0.5 rounded-full font-semibold">
+                      @{currentUser?.username}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                    Kirimkan kode atau tautan ini kepada pasangan/rekan Anda via WhatsApp untuk langsung terhubung:
+                  </p>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleCopyMyCode}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 py-2 px-3 text-xs font-bold text-white shadow-sm hover:bg-blue-700 active:scale-95 transition-all"
+                    >
+                      {copiedMyCode ? (
+                        <>
+                          <Check className="h-3.5 w-3.5" />
+                          <span>Kode Tersalin!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="h-3.5 w-3.5" />
+                          <span>Salin Kode Rekan</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCopyMyLink}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-blue-300 dark:border-blue-800 bg-white dark:bg-slate-800 py-2 px-3 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-slate-700 active:scale-95 transition-all"
+                    >
+                      {copiedMyLink ? (
+                        <Check className="h-3.5 w-3.5 text-emerald-600" />
+                      ) : (
+                        <Link2 className="h-3.5 w-3.5" />
+                      )}
+                      <span>Salin Link</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Masukkan Kode Rekan */}
+                <div className="space-y-2 pt-1">
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Masukkan Kode dari HP Rekan:
+                  </label>
                   <input
                     type="text"
-                    required
-                    placeholder="cth: username_rekan"
-                    value={inviteUsername}
-                    onChange={(e) => setInviteUsername(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-7 pr-3 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white focus:outline-none focus:border-blue-500"
+                    placeholder="Tempel kode MK-SYNC-... di sini"
+                    value={partnerCodeInput}
+                    onChange={(e) => {
+                      setPartnerCodeInput(e.target.value);
+                      setInviteError('');
+                    }}
+                    className="w-full rounded-xl border border-slate-200 bg-white py-2 px-3 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white focus:outline-none focus:border-blue-500 font-mono"
                   />
+                  <button
+                    type="button"
+                    onClick={() => handleConnectViaCode()}
+                    className="w-full rounded-xl bg-emerald-600 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 active:scale-95 transition-all"
+                  >
+                    Hubungkan Rekan Sekarang
+                  </button>
                 </div>
               </div>
+            )}
 
-              {inviteError && (
-                <p className="text-xs text-rose-500 flex items-center gap-1 font-medium">
-                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                  <span>{inviteError}</span>
+            {/* METHOD 2: USERNAME LOOKUP (DATABASE / LOCAL) */}
+            {inviteMethod === 'username' && (
+              <form onSubmit={handleSendInvite} className="mt-4 space-y-3">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Cari username rekan yang terdaftar pada database online Supabase atau perangkat ini.
                 </p>
-              )}
 
-              <div className="pt-2 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowInviteModal(false)}
-                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300"
-                >
-                  Batal
-                </button>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    Username Rekan
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">@</span>
+                    <input
+                      type="text"
+                      required
+                      placeholder="cth: username_rekan"
+                      value={inviteUsername}
+                      onChange={(e) => {
+                        setInviteUsername(e.target.value);
+                        setInviteError('');
+                      }}
+                      className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-7 pr-3 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-white focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
                 <button
                   type="submit"
-                  className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700"
+                  disabled={isSearchingCloud}
+                  className="w-full rounded-xl bg-blue-600 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
                 >
-                  Kirim Undangan
+                  {isSearchingCloud ? 'Mencari di Database Cloud...' : 'Kirim Undangan Rekan'}
                 </button>
+              </form>
+            )}
+
+            {/* Error Message */}
+            {inviteError && (
+              <div className="mt-3 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 flex items-start gap-2 text-xs text-rose-600 dark:text-rose-400">
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                <span className="leading-relaxed">{inviteError}</span>
               </div>
-            </form>
+            )}
+
+            {/* Footer Notice */}
+            <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 text-center">
+              <p className="text-[11px] text-slate-400">
+                💡 <strong>Tips:</strong> Jika kedua HP belum dihubungkan ke Supabase, gunakan tombol <strong>Salin Kode Rekan</strong> lalu kirimkan ke WhatsApp rekan Anda untuk terhubung secara instan!
+              </p>
+            </div>
           </div>
         </div>
       )}
