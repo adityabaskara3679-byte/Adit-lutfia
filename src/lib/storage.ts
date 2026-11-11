@@ -156,9 +156,44 @@ export function saveUser(user: UserProfile) {
 
 // Accounts
 export function getAccounts(userId: string): FinancialAccount[] {
+  if (!userId) return [];
   try {
     const list: FinancialAccount[] = JSON.parse(localStorage.getItem(ACCOUNTS_KEY) || '[]');
-    return list.filter((a) => a.userId === userId);
+    const userAccounts = list.filter((a) => a.userId === userId);
+    if (userAccounts.length === 0) {
+      const defaultAccounts: FinancialAccount[] = [
+        {
+          id: `acc-cash-${userId}`,
+          userId,
+          name: 'Kas Tunai (Dompet)',
+          type: 'cash',
+          balance: 0,
+          color: '#16A34A',
+          icon: 'Banknote',
+        },
+        {
+          id: `acc-bank-${userId}`,
+          userId,
+          name: 'Rekening Bank',
+          type: 'bank',
+          balance: 0,
+          color: '#2563EB',
+          icon: 'Building2',
+        },
+        {
+          id: `acc-wallet-${userId}`,
+          userId,
+          name: 'E-Wallet',
+          type: 'ewallet',
+          balance: 0,
+          color: '#06B6D4',
+          icon: 'Smartphone',
+        },
+      ];
+      localStorage.setItem(ACCOUNTS_KEY, JSON.stringify([...list, ...defaultAccounts]));
+      return defaultAccounts;
+    }
+    return userAccounts;
   } catch {
     return [];
   }
@@ -405,8 +440,14 @@ export function getActivePartner(userId: string): { partner: UserProfile; friend
   return {
     partner,
     friendship: active,
-    myPermissions: isRequester ? active.requesterPermissions : active.receiverPermissions,
-    partnerPermissions: isRequester ? active.receiverPermissions : active.requesterPermissions,
+    myPermissions: {
+      ...DEFAULT_SHARING_PERMISSIONS,
+      ...(isRequester ? active.requesterPermissions : active.receiverPermissions),
+    },
+    partnerPermissions: {
+      ...DEFAULT_SHARING_PERMISSIONS,
+      ...(isRequester ? active.receiverPermissions : active.requesterPermissions),
+    },
   };
 }
 

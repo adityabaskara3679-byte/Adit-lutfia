@@ -232,3 +232,46 @@ export async function syncPartnerFromCloud(partnerId: string): Promise<boolean> 
     return false;
   }
 }
+
+// Live real-time partner sync listener (Supabase Realtime + Polling)
+export function subscribeToLivePartnerUpdates(
+  partnerId: string,
+  onUpdate: () => void
+): () => void {
+  let isSubscribed = true;
+
+  if (isSupabaseConfigured && partnerId) {
+    // 1. Immediate sync on load
+    syncPartnerFromCloud(partnerId).then((success) => {
+      if (success && isSubscribed) onUpdate();
+    });
+
+    // 2. Realtime channel subscription
+    const channel = supabase
+      .channel(`partner_live_${partnerId}`)
+      .on('broadcast', { event: 'finance_updated' }, async () => {
+        if (!isSubscribed) return;
+        const ok = await syncPartnerFromCloud(partnerId);
+        if (ok && isSubscribed) onUpdate();
+      })
+      .subscribe();
+
+    // 3. 5-second polling interval for live display
+    const timer = setInterval(async () => {
+      if (!isSubscribed) return;
+      const ok = await syncPartnerFromCloud(partnerId);
+      if (ok && isSubscribed) onUpdate();
+    }, 5000);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(timer);
+      supabase.removeChannel(channel);
+    };
+  }
+
+  return () => {
+    isSubscribed = false;
+  };
+}
+

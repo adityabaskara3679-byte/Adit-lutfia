@@ -49,7 +49,11 @@ import {
   DEFAULT_SHARING_PERMISSIONS
 } from '../../lib/storage.ts';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase.ts';
-import { syncPartnerFromCloud, pushUserDataToCloud } from '../../lib/cloudSync.ts';
+import {
+  syncPartnerFromCloud,
+  pushUserDataToCloud,
+  subscribeToLivePartnerUpdates
+} from '../../lib/cloudSync.ts';
 import {
   IncomeExpenseChart,
   BalanceTrendChart,
@@ -69,10 +73,20 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
   const [inviteUsername, setInviteUsername] = useState('');
   const [inviteError, setInviteError] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const allUsers = useMemo(() => getAllUsers(), []);
-  const friendships = useMemo(() => getFriendships(userId), [userId]);
-  const activePartnerData = useMemo(() => getActivePartner(userId), [userId, friendships]);
+  const allUsers = useMemo(() => getAllUsers(), [refreshKey]);
+  const friendships = useMemo(() => getFriendships(userId), [userId, refreshKey]);
+  const activePartnerData = useMemo(() => getActivePartner(userId), [userId, friendships, refreshKey]);
+
+  // Local state for immediate, responsive toggling of sharing permissions
+  const [localMyPerms, setLocalMyPerms] = useState<SharingPermissions>(DEFAULT_SHARING_PERMISSIONS);
+
+  useEffect(() => {
+    if (activePartnerData?.myPermissions) {
+      setLocalMyPerms(activePartnerData.myPermissions);
+    }
+  }, [activePartnerData]);
 
   // Invitations received (pending)
   const pendingRequests = useMemo(() => {
@@ -85,11 +99,11 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
   }, [friendships, userId]);
 
   // My Financial Data
-  const myAccounts = useMemo(() => getAccounts(userId), [userId]);
-  const myTransactions = useMemo(() => getTransactions(userId), [userId]);
-  const mySavings = useMemo(() => getSavingsGoals(userId), [userId]);
-  const myDebts = useMemo(() => getDebts(userId), [userId]);
-  const categories = useMemo(() => getCategories(userId), [userId]);
+  const myAccounts = useMemo(() => getAccounts(userId), [userId, refreshKey]);
+  const myTransactions = useMemo(() => getTransactions(userId), [userId, refreshKey]);
+  const mySavings = useMemo(() => getSavingsGoals(userId), [userId, refreshKey]);
+  const myDebts = useMemo(() => getDebts(userId), [userId, refreshKey]);
+  const categories = useMemo(() => getCategories(userId), [userId, refreshKey]);
 
   const myBalance = useMemo(() => myAccounts.reduce((sum, a) => sum + a.balance, 0), [myAccounts]);
   const mySavingsTotal = useMemo(() => mySavings.reduce((sum, s) => sum + s.currentAmount, 0), [mySavings]);
@@ -130,12 +144,7 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
   const partnerAccounts = useMemo(() => {
     if (!partnerUser || !partnerPerms?.shareBalance) return [];
     return getAccounts(partnerUser.id);
-  }, [partnerUser, partnerPerms]);
-
-  const partnerBalance = useMemo(() => {
-    if (!partnerPerms?.shareBalance) return 0;
-    return partnerAccounts.reduce((sum, a) => sum + a.balance, 0);
-  }, [partnerAccounts, partnerPerms]);
+  }, [partnerUser, partnerPerms, refreshKey]);
 
   const partnerTransactions = useMemo(() => {
     if (!partnerUser) return [];
@@ -145,7 +154,21 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
       if (t.type === 'expense' && !partnerPerms?.shareExpense) return false;
       return true;
     });
-  }, [partnerUser, partnerPerms]);
+  }, [partnerUser, partnerPerms, refreshKey]);
+
+  const partnerBalance = useMemo(() => {
+    if (!partnerPerms?.shareBalance) return 0;
+    const accountSum = partnerAccounts.reduce((sum, a) => sum + a.balance, 0);
+    if (accountSum > 0) return accountSum;
+    // Fallback: calculate net income - expense if accounts are not directly modified
+    if (partnerTransactions.length > 0) {
+      const inc = partnerTransactions.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+      const exp = partnerTransactions.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+      const net = inc - exp;
+      if (net > 0) return net;
+    }
+    return accountSum;
+  }, [partnerAccounts, partnerPerms, partnerTransactions]);
 
   const partnerFilteredTx = useMemo(() => {
     const now = new Date();
@@ -170,7 +193,7 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
   const partnerSavings = useMemo(() => {
     if (!partnerUser || !partnerPerms?.shareSavings) return [];
     return getSavingsGoals(partnerUser.id);
-  }, [partnerUser, partnerPerms]);
+  }, [partnerUser, partnerPerms, refreshKey]);
 
   const partnerSavingsTotal = useMemo(() => {
     if (!partnerPerms?.shareSavings) return 0;
@@ -180,7 +203,7 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
   const partnerDebts = useMemo(() => {
     if (!partnerUser || !partnerPerms?.shareDebts) return [];
     return getDebts(partnerUser.id);
-  }, [partnerUser, partnerPerms]);
+  }, [partnerUser, partnerPerms, refreshKey]);
 
   const partnerDebtTotal = useMemo(() => {
     if (!partnerPerms?.shareDebts) return 0;
@@ -211,16 +234,29 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
 
   const generateMyPairingCode = () => {
     if (!currentUser) return '';
+    const myAccs = getAccounts(userId);
+    const myTxs = getTransactions(userId);
+    const mySavings = getSavingsGoals(userId);
+    const myDebts = getDebts(userId);
+    const accSum = myAccs.reduce((s, a) => s + a.balance, 0);
+    const txNet = myTxs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0) -
+                  myTxs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const activeBalance = accSum > 0 ? accSum : Math.max(0, txNet);
+
     const payload = {
       id: currentUser.id,
       username: currentUser.username,
       fullName: currentUser.fullName,
       email: currentUser.email,
       currency: currentUser.currency || 'IDR',
-      accounts: getAccounts(userId),
-      transactions: getTransactions(userId).slice(0, 50),
-      savings: getSavingsGoals(userId),
-      debts: getDebts(userId),
+      totalBalance: activeBalance,
+      accounts: myAccs.map((a, idx) => ({
+        ...a,
+        balance: a.balance > 0 ? a.balance : (idx === 0 && activeBalance > 0 ? activeBalance : a.balance),
+      })),
+      transactions: myTxs.slice(0, 100),
+      savings: mySavings,
+      debts: myDebts,
       syncedAt: new Date().toISOString(),
     };
     try {
@@ -256,29 +292,40 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
 
   const handleSyncLive = async () => {
     setIsSyncing(true);
-
-    if (isSupabaseConfigured) {
-      await pushUserDataToCloud(userId);
-      if (partnerUser) {
-        await syncPartnerFromCloud(partnerUser.id);
+    try {
+      if (isSupabaseConfigured) {
+        await pushUserDataToCloud(userId);
+        if (partnerUser) {
+          await syncPartnerFromCloud(partnerUser.id);
+        }
       }
+    } catch (e) {
+      console.error('Error during live sync:', e);
+    } finally {
+      setRefreshKey((k) => k + 1);
       setIsSyncing(false);
-      alert('Data keuangan rekan berhasil diperbarui dari database cloud!');
-      window.location.reload();
-      return;
     }
-
-    setIsSyncing(false);
-    setInviteMethod('code');
-    setShowInviteModal(true);
   };
 
-  // Auto-sync from cloud if Supabase is active
+  // Live real-time Supabase partner listener & 5-second polling interval
   useEffect(() => {
-    if (isSupabaseConfigured && partnerUser?.id) {
-      syncPartnerFromCloud(partnerUser.id);
-    }
+    if (!partnerUser?.id) return;
+    const unsubscribe = subscribeToLivePartnerUpdates(partnerUser.id, () => {
+      setRefreshKey((k) => k + 1);
+    });
+    return () => {
+      unsubscribe();
+    };
   }, [partnerUser?.id]);
+
+  // Cross-tab real-time storage event listener (for instant updates in multi-tab / same browser)
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setRefreshKey((k) => k + 1);
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
 
   const handleConnectViaCode = (codeToConnect?: string) => {
     const raw = (codeToConnect || partnerCodeInput).trim();
@@ -308,6 +355,24 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
         return;
       }
 
+      // Ensure accounts have realistic balance if totalBalance was provided
+      let importedAccounts = Array.isArray(partnerData.accounts) ? [...partnerData.accounts] : [];
+      const claimedBalance = Number(partnerData.totalBalance) || 0;
+      const accTotal = importedAccounts.reduce((sum: number, a: any) => sum + (Number(a.balance) || 0), 0);
+      if (importedAccounts.length === 0 || (claimedBalance > 0 && accTotal === 0)) {
+        importedAccounts = [
+          {
+            id: `acc-main-${partnerData.id}`,
+            userId: partnerData.id,
+            name: 'Kas & Rekening Utama Rekan',
+            type: 'cash',
+            balance: claimedBalance > 0 ? claimedBalance : 0,
+            color: '#16A34A',
+            icon: 'Wallet',
+          },
+        ];
+      }
+
       // Save partner profile AND import their real accounts, transactions, savings, debts!
       importPartnerFinancialData({
         profile: {
@@ -318,7 +383,7 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
           currency: partnerData.currency || 'IDR',
           createdAt: partnerData.createdAt || new Date().toISOString(),
         },
-        accounts: partnerData.accounts || [],
+        accounts: importedAccounts,
         transactions: partnerData.transactions || [],
         savings: partnerData.savings || [],
         debts: partnerData.debts || [],
@@ -332,16 +397,14 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
       );
 
       if (existing) {
-        // If already connected or pending, refresh state and update
         const accepted: Friendship = {
           ...existing,
           status: 'accepted',
           updatedAt: new Date().toISOString(),
         };
         saveFriendship(accepted);
-        alert(`Data keuangan nyata milik @${partnerData.username} berhasil disinkronkan & diperbarui!`);
+        setRefreshKey((k) => k + 1);
         setShowInviteModal(false);
-        window.location.reload();
         return;
       }
 
@@ -358,9 +421,8 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
       };
 
       saveFriendship(newFriendship);
+      setRefreshKey((k) => k + 1);
       setShowInviteModal(false);
-      alert(`Selamat! Anda dan @${partnerData.username} berhasil terhubung. Seluruh data keuangan nyata rekan telah dimuat.`);
-      window.location.reload();
     } catch {
       setInviteError('Format kode rekan tidak valid. Pastikan kode disalin lengkap dari HP rekan.');
     }
@@ -460,7 +522,7 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
     saveFriendship(newFriendship);
     setInviteUsername('');
     setShowInviteModal(false);
-    alert(`Undangan berhasil dikirim ke @${targetUser.username}!`);
+    setRefreshKey((k) => k + 1);
   };
 
   const handleAcceptInvite = (friendship: Friendship) => {
@@ -470,7 +532,7 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
       updatedAt: new Date().toISOString(),
     };
     saveFriendship(updated);
-    alert('Undangan rekan diterima!');
+    setRefreshKey((k) => k + 1);
   };
 
   const handleRejectInvite = (friendship: Friendship) => {
@@ -480,31 +542,97 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
       updatedAt: new Date().toISOString(),
     };
     saveFriendship(updated);
+    setRefreshKey((k) => k + 1);
   };
 
   const handleDisconnect = () => {
     if (activePartnerData && confirm(`Putuskan koneksi rekan dengan @${activePartnerData.partner.username}?`)) {
       deleteFriendship(activePartnerData.friendship.id);
+      setRefreshKey((k) => k + 1);
     }
   };
 
   const handleToggleMyPermission = (key: keyof SharingPermissions) => {
     if (!activePartnerData) return;
     const isRequester = activePartnerData.friendship.requesterId === userId;
-    const currentPerms = isRequester
-      ? activePartnerData.friendship.requesterPermissions
-      : activePartnerData.friendship.receiverPermissions;
+    const currentVal = Boolean(localMyPerms[key]);
+    const newPerms: SharingPermissions = {
+      ...localMyPerms,
+      [key]: !currentVal,
+    };
 
-    const newPerms = { ...currentPerms, [key]: !currentPerms[key] };
+    // 1. Instant reactive UI switch
+    setLocalMyPerms(newPerms);
 
+    // 2. Persist locally
     const updated: Friendship = {
       ...activePartnerData.friendship,
-      requesterPermissions: isRequester ? newPerms : activePartnerData.friendship.requesterPermissions,
-      receiverPermissions: !isRequester ? newPerms : activePartnerData.friendship.receiverPermissions,
+      requesterPermissions: isRequester
+        ? newPerms
+        : (activePartnerData.friendship.requesterPermissions || DEFAULT_SHARING_PERMISSIONS),
+      receiverPermissions: !isRequester
+        ? newPerms
+        : (activePartnerData.friendship.receiverPermissions || DEFAULT_SHARING_PERMISSIONS),
       updatedAt: new Date().toISOString(),
     };
 
     saveFriendship(updated);
+    setRefreshKey((k) => k + 1);
+
+    // 3. Persist to Supabase if configured
+    if (isSupabaseConfigured) {
+      supabase.from('friendships').upsert({
+        id: updated.id,
+        requester_id: updated.requesterId,
+        receiver_id: updated.receiverId,
+        status: updated.status,
+        requester_permissions: updated.requesterPermissions,
+        receiver_permissions: updated.receiverPermissions,
+        updated_at: updated.updatedAt,
+      }).then();
+    }
+  };
+
+  const handleSetAllPermissions = (enable: boolean) => {
+    if (!activePartnerData) return;
+    const isRequester = activePartnerData.friendship.requesterId === userId;
+    const newPerms: SharingPermissions = {
+      shareBalance: enable,
+      shareIncome: enable,
+      shareExpense: enable,
+      shareSavings: enable,
+      shareDebts: enable,
+      shareTransactions: enable,
+      shareReports: enable,
+    };
+
+    setLocalMyPerms(newPerms);
+
+    const updated: Friendship = {
+      ...activePartnerData.friendship,
+      requesterPermissions: isRequester
+        ? newPerms
+        : (activePartnerData.friendship.requesterPermissions || DEFAULT_SHARING_PERMISSIONS),
+      receiverPermissions: !isRequester
+        ? newPerms
+        : (activePartnerData.friendship.receiverPermissions || DEFAULT_SHARING_PERMISSIONS),
+      updatedAt: new Date().toISOString(),
+    };
+
+    saveFriendship(updated);
+    setRefreshKey((k) => k + 1);
+
+    if (isSupabaseConfigured) {
+      supabase.from('friendships').upsert({
+        id: updated.id,
+        requester_id: updated.requesterId,
+        receiver_id: updated.receiverId,
+        status: updated.status,
+        requester_permissions: updated.requesterPermissions,
+        receiver_permissions: updated.receiverPermissions,
+        updated_at: updated.updatedAt,
+      }).then();
+    }
   };
 
   return (
@@ -1243,7 +1371,29 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
               </button>
             </div>
 
-            <div className="divide-y divide-slate-100 dark:divide-slate-800 my-4 space-y-2">
+            {/* Quick Bulk Actions */}
+            <div className="flex items-center justify-between pt-2 pb-1">
+              <span className="text-[11px] font-medium text-slate-400">Pengaturan Cepat:</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSetAllPermissions(true)}
+                  className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                >
+                  Izinkan Semua
+                </button>
+                <span className="text-slate-300 dark:text-slate-700">|</span>
+                <button
+                  type="button"
+                  onClick={() => handleSetAllPermissions(false)}
+                  className="text-[11px] font-semibold text-rose-500 hover:text-rose-600"
+                >
+                  Matikan Semua
+                </button>
+              </div>
+            </div>
+
+            <div className="divide-y divide-slate-100 dark:divide-slate-800 my-3 space-y-2">
               {[
                 { key: 'shareBalance', label: 'Berbagi Ringkasan Saldo', desc: 'Total saldo di semua rekening & kas' },
                 { key: 'shareIncome', label: 'Berbagi Pemasukan', desc: 'Total dan rincian arus kas masuk' },
@@ -1253,18 +1403,21 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
                 { key: 'shareTransactions', label: 'Berbagi Riwayat Transaksi', desc: 'Daftar mutasi transaksi harian' },
                 { key: 'shareReports', label: 'Berbagi Laporan Keuangan', desc: 'Arus kas dan analisis bulanan' },
               ].map((item) => {
-                const isEnabled = myPerms?.[item.key as keyof SharingPermissions];
+                const isEnabled = Boolean(localMyPerms[item.key as keyof SharingPermissions]);
                 return (
-                  <div key={item.key} className="pt-2 flex items-center justify-between">
-                    <div>
+                  <div key={item.key} className="pt-2.5 flex items-center justify-between">
+                    <div className="pr-2">
                       <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{item.label}</p>
                       <p className="text-[11px] text-slate-400">{item.desc}</p>
                     </div>
                     <button
                       type="button"
-                      onClick={() => handleToggleMyPermission(item.key as keyof SharingPermissions)}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                        isEnabled ? 'bg-blue-600' : 'bg-slate-200 dark:bg-slate-700'
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleMyPermission(item.key as keyof SharingPermissions);
+                      }}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                        isEnabled ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
                     >
                       <span
@@ -1279,10 +1432,14 @@ export function PartnerView({ userId, onSelectTab }: PartnerViewProps) {
             </div>
 
             <button
-              onClick={() => setShowPermissionsModal(false)}
+              type="button"
+              onClick={() => {
+                setShowPermissionsModal(false);
+                setRefreshKey((k) => k + 1);
+              }}
               className="w-full rounded-xl bg-blue-600 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors"
             >
-              Simpan & Tutup
+              Simpan & Terapkan Izin
             </button>
           </div>
         </div>
